@@ -1,0 +1,13 @@
+[package]
+name = "pivotradar-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PivotRadar: motor unico de deteccion multiactivo (port de PivotRadar_Hybrid v7.6 MQL5)"
+
+[dependencies]
+serde.workspace = true
+
+[lib]
+name = "pivotradar_core"
+crate-type = ["rlib"]

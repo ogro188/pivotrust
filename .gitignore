@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+data/
+
+# Rust
+target/
+*.pyd
+*.so
+Cargo.lock
+
+# misc
+.DS_Store
