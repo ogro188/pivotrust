@@ -91,7 +91,7 @@ impl PendingRecord {
             entry_time: s.entry_time,
             direction: s.direction,
             entry_price: s.entry_price,
-            detector: s.detector,
+            detector: s.detector.clone(),
             tipo: s.tipo.clone(),
             signal_age_bars: s.signal_age_bars,
             completada: s.completada,

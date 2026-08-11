@@ -21,6 +21,7 @@ from pivotradar_platform.engine_iface import EngineOutput, MarketData  # noqa: E
 from pivotradar_platform.feeds.synthetic import SyntheticFeed  # noqa: E402
 from pivotradar_platform.notifier import format_notification  # noqa: E402
 from pivotradar_platform.reference_engine import ReferenceEngine, _bar_shift_by_time  # noqa: E402
+from pivotradar_platform.rust_engine import RustEngine  # noqa: E402
 from pivotradar_platform.types import Bar, Signal  # noqa: E402
 
 
@@ -101,10 +102,14 @@ def test_format_notification_separators():
     assert parts[-1] == "Razón"  # sin separador redundante final
 
 
-def test_engine_factory_default_reference():
-    cal = Calibration(engine="rust")  # rust no compilado -> fallback
+def test_engine_factory_default_matches_availability():
+    from pivotradar_platform.rust_engine import RUST_AVAILABLE
+    cal = Calibration(engine="rust")
     eng = build_engine(cal)
-    assert isinstance(eng, ReferenceEngine)
+    if RUST_AVAILABLE:
+        assert isinstance(eng, RustEngine)
+    else:
+        assert isinstance(eng, ReferenceEngine)  # fallback sin Rust
 
 
 def test_engine_factory_force_reference():

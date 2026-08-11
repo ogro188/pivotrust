@@ -8,6 +8,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use pyo3::IntoPyObjectExt;
 use pivotradar_core::{Bar, Engine as CoreEngine, PendingRecord, SymbolInfo};
 use serde_json::Value;
 
@@ -20,7 +21,7 @@ struct Signal {
 impl Signal {
     /// Representación completa como dict Python (todos los campos del motor).
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let v = serde_json::to_value(&self.inner).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let v = serde_json::to_value(&self.inner).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         json_to_py(py, &v)
     }
 
@@ -35,7 +36,10 @@ impl Signal {
 fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<Py<PyAny>> {
     Ok(match v {
         Value::Null => py.None(),
-        Value::Bool(b) => b.into_pyobject(py)?.into_any().unbind(),
+        Value::Bool(b) => {
+            let bval = *b;
+            bval.into_py_any(py)?
+        }
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 i.into_pyobject(py)?.into_any().unbind()
@@ -51,14 +55,14 @@ fn json_to_py(py: Python<'_>, v: &Value) -> PyResult<Py<PyAny>> {
         }
         Value::String(s) => s.clone().into_pyobject(py)?.into_any().unbind(),
         Value::Array(arr) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in arr {
                 list.append(json_to_py(py, item)?)?;
             }
             list.into_any().unbind()
         }
         Value::Object(map) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (k, val) in map {
                 dict.set_item(k, json_to_py(py, val)?)?;
             }
@@ -97,11 +101,11 @@ impl PyEngine {
         pending_json: String,
     ) -> PyResult<Self> {
         let cal: pivotradar_core::Calibration =
-            serde_json::from_str(&calibration_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
+            serde_json::from_str(&calibration_json).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         let pending: Vec<PendingRecord> = if pending_json.trim().is_empty() {
             Vec::new()
         } else {
-            serde_json::from_str(&pending_json).map_err(pyo3::exceptions::PyValueError::new_err)?
+            serde_json::from_str(&pending_json).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
         };
         let info = SymbolInfo::new(&symbol, point, digits);
         Ok(PyEngine {

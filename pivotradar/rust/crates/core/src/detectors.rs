@@ -51,7 +51,7 @@ impl Engine {
 
         let mut highest_high = mkt.m15[1].high;
         let mut lowest_low = mkt.m15[1].low;
-        let lim = (self.cal.n_ruptura + 1).min(99);
+        let lim = (self.cal.n_ruptura + 1).max(2).min(99) as usize;
         for k in 2..=lim {
             let Some(b) = mkt.m15.get(k) else { break };
             if b.high == 0.0 || b.low == 0.0 {
@@ -183,7 +183,7 @@ impl Engine {
 
             let mut ph = mkt.m15.get(i + 1).map(|b| b.high).unwrap_or(0.0);
             let mut pl = mkt.m15.get(i + 1).map(|b| b.low).unwrap_or(0.0);
-            let k_lim = (i + self.cal.sweep_n).min(99);
+            let k_lim = (i + self.cal.sweep_n.max(0) as usize).min(99);
             for k in (i + 1)..=k_lim {
                 let Some(bk) = mkt.m15.get(k) else { break };
                 if bk.high == 0.0 || bk.low == 0.0 {
@@ -216,7 +216,7 @@ impl Engine {
             }
 
             let mut eq = false;
-            let j_lim = (i + self.cal.equal_hl_window).min(99);
+            let j_lim = (i + self.cal.equal_hl_window.max(0) as usize).min(99);
             for j in (i + 1)..=j_lim {
                 let Some(bj) = mkt.m15.get(j) else { break };
                 let (hj, lj) = (bj.high, bj.low);
@@ -326,7 +326,7 @@ impl Engine {
 
         let mut prior_high = mkt.m15[1].high;
         let mut prior_low = mkt.m15[1].low;
-        let lim = self.cal.sweep_n.min(99);
+        let lim = self.cal.sweep_n.max(2).min(99) as usize;
         for k in 2..=lim {
             let Some(b) = mkt.m15.get(k) else { break };
             if b.high == 0.0 || b.low == 0.0 {
@@ -763,7 +763,7 @@ impl Engine {
 
             let mut ph = mkt.m15.get(i + 1).map(|b| b.high).unwrap_or(0.0);
             let mut pl = mkt.m15.get(i + 1).map(|b| b.low).unwrap_or(0.0);
-            let k_lim = (i + self.cal.sweep_n).min(99);
+            let k_lim = (i + self.cal.sweep_n.max(0) as usize).min(99);
             for k in (i + 1)..=k_lim {
                 let Some(bk) = mkt.m15.get(k) else { break };
                 if bk.high == 0.0 || bk.low == 0.0 {

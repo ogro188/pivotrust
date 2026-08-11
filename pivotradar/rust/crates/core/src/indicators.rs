@@ -81,7 +81,6 @@ pub fn atr_series(bars: &[Bar], period: usize) -> Vec<f64> {
     for i in (0..n).rev() {
         let h = bars[i].high;
         let l = bars[i].low;
-        let c = bars[i].close;
         if i + 1 < n {
             let pc = bars[i + 1].close;
             tr[i] = (h - l).max((h - pc).abs()).max((l - pc).abs());

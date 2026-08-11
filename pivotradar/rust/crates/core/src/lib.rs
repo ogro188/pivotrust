@@ -10,6 +10,7 @@
 pub mod calibration;
 pub mod classifiers;
 pub mod confluence;
+pub mod detectors;
 pub mod engine;
 pub mod gauges;
 pub mod hypothesis;

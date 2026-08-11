@@ -273,7 +273,6 @@ pub fn generar_hipotesis(
             let dir_mss = sig.mss_direction.clone();
             let accion = if sig.direction == 1 { "continuación alcista" } else { "continuación bajista" };
             let nivel = fmt_price(sig.level_swept, digits);
-            let estructura = sig.estructura_direccion.clone();
             let invalidez_nivel = if sig.direction == 1 {
                 fmt_price(sig.level_swept - atr * 0.5, digits)
             } else {

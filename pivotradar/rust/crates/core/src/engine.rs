@@ -56,20 +56,20 @@ pub struct Engine {
     pub cal: Calibration,
     pub info: SymbolInfo,
 
-    atr14_buffer: Vec<f64>,
-    ema21_buffer: Vec<f64>,
+    pub(crate) atr14_buffer: Vec<f64>,
+    pub(crate) ema21_buffer: Vec<f64>,
     ema50_buffer: Vec<f64>,
     ema50_d1_buffer: Vec<f64>,
     ema200_d1_buffer: Vec<f64>,
     atr_history: [f64; 20],
 
-    g1: f64,
-    g2: f64,
+    pub(crate) g1: f64,
+    pub(crate) g2: f64,
     g3: f64,
-    g4: f64,
+    pub(crate) g4: f64,
     last_g_calc_bar: i64,
 
-    estructura: EstructuraRef,
+    pub(crate) estructura: EstructuraRef,
     estructura_timestamp: i64,
     last_struct_update: i64,
 
@@ -78,10 +78,6 @@ pub struct Engine {
     mss_bars_ago: i32,
     mss_dir: String,
     mss_level: f64,
-
-    zona_valid: bool,
-    zona_time: i64,
-    zona_mid: f64,
 
     latches: [DetectorLatch; 6],
     pending: std::collections::VecDeque<Signal>,
@@ -118,9 +114,6 @@ impl Engine {
             mss_bars_ago: 0,
             mss_dir: String::new(),
             mss_level: 0.0,
-            zona_valid: false,
-            zona_time: 0,
-            zona_mid: 0.0,
             latches: std::array::from_fn(|_| DetectorLatch::default()),
             pending: std::collections::VecDeque::new(),
             atr_history_head: 0,
@@ -195,7 +188,6 @@ impl Engine {
         if self.mss_time != current_h4 {
             self.mss_valid = false;
         }
-        self.zona_valid = false;
 
         let ctx = BarCtx {
             vol_ratio,
@@ -312,11 +304,11 @@ impl Engine {
         result
     }
 
-    fn is_duplicate(&self, id: u64) -> bool {
+    pub(crate) fn is_duplicate(&self, id: u64) -> bool {
         self.pending.iter().any(|s| s.id == id)
     }
 
-    fn latch_fired(&self, det: Detector, direction: i32, current_bar: i64) -> bool {
+    pub(crate) fn latch_fired(&self, det: Detector, direction: i32, current_bar: i64) -> bool {
         let Some(idx) = det.latch_index() else { return false };
         let key = format!("{}|{}", det.as_str(), direction);
         let l = &self.latches[idx];
@@ -326,7 +318,7 @@ impl Engine {
         l.fired && l.pattern_key == key
     }
 
-    fn mark_latch(&mut self, det: Detector, direction: i32, current_bar: i64) {
+    pub(crate) fn mark_latch(&mut self, det: Detector, direction: i32, current_bar: i64) {
         let Some(idx) = det.latch_index() else { return };
         let key = format!("{}|{}", det.as_str(), direction);
         self.latches[idx].last_bar = current_bar;
@@ -334,7 +326,7 @@ impl Engine {
         self.latches[idx].fired = true;
     }
 
-    fn detect_mss_cached(&mut self, mkt: &MarketData) -> Option<(i32, String, f64)> {
+    pub(crate) fn detect_mss_cached(&mut self, mkt: &MarketData) -> Option<(i32, String, f64)> {
         let current_h4 = mkt.h4.first().map(|b| b.time).unwrap_or(0);
         if self.mss_valid && self.mss_time == current_h4 {
             return Some((self.mss_bars_ago, self.mss_dir.clone(), self.mss_level));
@@ -353,46 +345,6 @@ impl Engine {
                 self.mss_valid = false;
                 None
             }
-        }
-    }
-
-    fn zona_mid(&mut self, mkt: &MarketData) -> f64 {
-        let cur = mkt.m15.first().map(|b| b.time).unwrap_or(0);
-        if self.zona_valid && self.zona_time == cur {
-            return self.zona_mid;
-        }
-        let mut max_high = 0.0;
-        let mut min_low = 999_999.0;
-        for i in 1..=50 {
-            let Some(b) = mkt.m15.get(i) else { break };
-            if b.high == 0.0 || b.low == 0.0 {
-                break;
-            }
-            if b.high > max_high {
-                max_high = b.high;
-            }
-            if b.low < min_low {
-                min_low = b.low;
-            }
-        }
-        let mid = if max_high > 0.0 && min_low > 0.0 && max_high > min_low {
-            (max_high + min_low) / 2.0
-        } else {
-            0.0
-        };
-        self.zona_valid = true;
-        self.zona_time = cur;
-        self.zona_mid = mid;
-        mid
-    }
-
-    fn es_zona_premium(&mut self, mkt: &MarketData, nivel: f64) -> (bool, String) {
-        let mid = self.zona_mid(mkt);
-        if mid > 0.0 {
-            let zona = if nivel > mid { "PREMIUM" } else { "DISCOUNT" };
-            (true, String::from(zona))
-        } else {
-            (false, String::from("NEUTRO"))
         }
     }
 
