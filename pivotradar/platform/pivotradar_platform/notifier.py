@@ -13,6 +13,22 @@ log = logging.getLogger(__name__)
 _TIPO_EMOJI = {"A": "🟢", "B": "🟡", "C": "🟠", "D": "⚪"}
 
 
+def format_notification(sig: Signal) -> str:
+    """Convierte hipotesis_texto (con \n) en bloques separados visualmente.
+
+    ntfy.sh colapsa los \n en móviles; los separadores `━` garantizan espaciado real.
+    """
+    lines = sig.hipotesis_texto.split("\n")
+    separator = "━━━━━━━━━━━━━━━━━━━━"
+    blocks: list[str] = []
+    for line in lines:
+        blocks.append(line)
+        blocks.append(separator)
+    if blocks:
+        blocks.pop()  # quitar el último separador redundante
+    return "\n".join(blocks)
+
+
 class Notifier:
     def __init__(self, server: str, topic: str, enabled: bool = True):
         self.server = server.rstrip("/")
@@ -22,10 +38,13 @@ class Notifier:
     def _send(self, title: str, message: str, tags: list[str] | None = None):
         if not self.enabled or not self.topic:
             return
+        headers = {"Content-Type": "text/plain"}
+        if title:
+            headers["Title"] = title
+        if tags:
+            headers["Tags"] = ",".join(tags)
         try:
-            r = requests.post(f"{self.server}/{self.topic}",
-                              json={"title": title, "message": message, "tags": tags or []},
-                              timeout=10)
+            r = requests.post(f"{self.server}/{self.topic}", data=message.encode("utf-8"), headers=headers, timeout=10)
             r.raise_for_status()
         except Exception as e:  # noqa: BLE001
             log.warning("ntfy falló para %s: %s", self.topic, e)
@@ -44,7 +63,10 @@ class Notifier:
             lines.append(f"⚠️ {sig.hipotesis_causa}")
         if sig.hipotesis_invalidez:
             lines.append(f"❌ {sig.hipotesis_invalidez}")
-        self._send(title, "\n".join(lines), tags=["pivotradar", sig.detector])
+        body = "\n".join(lines)
+        if sig.hipotesis_texto:
+            body += "\n\n" + format_notification(sig)
+        self._send(title, body, tags=["pivotradar", sig.detector])
 
     def signal_completed(self, sig: Signal):
         ret_4 = sig.retorno[-1] if sig.retorno else 0.0

@@ -84,7 +84,9 @@ pub struct Engine {
     zona_mid: f64,
 
     latches: [DetectorLatch; 6],
-    pending: Vec<Signal>,
+    pending: std::collections::VecDeque<Signal>,
+
+    atr_history_head: usize,
 
     vol_cached_time: i64,
     vol_cached_shift: i32,
@@ -120,20 +122,21 @@ impl Engine {
             zona_time: 0,
             zona_mid: 0.0,
             latches: std::array::from_fn(|_| DetectorLatch::default()),
-            pending: Vec::new(),
+            pending: std::collections::VecDeque::new(),
+            atr_history_head: 0,
             vol_cached_time: 0,
             vol_cached_shift: -1,
             vol_cached_n: -1,
             vol_cached_val: 1.0,
         };
         for rec in pending {
-            engine.pending.push(signal_from_pending(&rec));
+            engine.pending.push_back(signal_from_pending(&rec));
         }
         engine
     }
 
     pub fn pending_snapshot(&self) -> Vec<Signal> {
-        self.pending.clone()
+        self.pending.iter().cloned().collect()
     }
 
     /// Procesa un snapshot de mercado. Equivale a OnTick -> ProcessIntraBar + ruteo.
@@ -159,8 +162,8 @@ impl Engine {
         let (hour, minute) = indicators::local_hour_min(current_bar, self.cal.utc_offset_hours);
         let session = indicators::session(hour);
         let kill_zone = indicators::kill_zone(hour, minute);
-        let vol_exp = indicators::vol_expanding(&self.atr_history);
-        let vol_comp = indicators::vol_compressing(&self.atr_history);
+        let vol_exp = indicators::vol_expanding(&self.atr_history, self.atr_history_head);
+        let vol_comp = indicators::vol_compressing(&self.atr_history, self.atr_history_head);
         let trend_d1 = indicators::trend_d1(&self.ema50_d1_buffer, &self.ema200_d1_buffer);
         let trend_velas = indicators::trend_velas(&self.ema21_buffer, &self.ema50_buffer, 55);
 
@@ -238,12 +241,12 @@ impl Engine {
                 self.info.point,
                 self.info.digits,
             );
-            self.route_signal(sig, out);
+            self.route_signal(mkt, sig, out);
         }
     }
 
     /// Espejo de RouteSignal (sin I/O: la plataforma persiste y notifica).
-    fn route_signal(&mut self, mut sig: Signal, out: &mut Vec<Signal>) {
+    fn route_signal(&mut self, mkt: &MarketData, mut sig: Signal, out: &mut Vec<Signal>) {
         sig.calidad_sweep = indicators::clamp_0_100(sig.calidad_sweep);
         sig.calidad_mss = indicators::clamp_0_100(sig.calidad_mss);
         sig.calidad_fvg = indicators::clamp_0_100(sig.calidad_fvg);
@@ -251,10 +254,20 @@ impl Engine {
         sig.salud_tendencial = indicators::clamp_0_100(sig.salud_tendencial);
         sig.contexto_estructural = indicators::clamp_0_100(sig.contexto_estructural);
 
-        if self.pending.len() >= MAX_PENDING {
-            self.pending.remove(0);
+        // NUEVO: poblar spread y gap si el feed lo provee
+        if let Some(spread) = mkt.spread_points {
+            sig.spread_pips = spread;
         }
-        self.pending.push(sig.clone());
+        // gap_detected: true si el spread es anómalo (> 3× ATR14 en puntos)
+        let atr_pips = sig.atr14; // ya está en puntos
+        if sig.spread_pips > atr_pips * 3.0 && atr_pips > 0.0 {
+            sig.gap_detected = true;
+        }
+
+        if self.pending.len() >= MAX_PENDING {
+            self.pending.pop_front();
+        }
+        self.pending.push_back(sig.clone());
         out.push(sig);
     }
 
@@ -279,10 +292,8 @@ impl Engine {
     }
 
     fn update_atr_history(&mut self) {
-        for i in (1..20).rev() {
-            self.atr_history[i] = self.atr_history[i - 1];
-        }
-        self.atr_history[0] = self.atr14_buffer[0];
+        self.atr_history_head = (self.atr_history_head + 1) % 20;
+        self.atr_history[self.atr_history_head] = self.atr14_buffer[0];
     }
 
     fn volume_ratio_cached(&mut self, mkt: &MarketData, shift: usize, n: i32) -> f64 {
@@ -353,9 +364,6 @@ impl Engine {
         let mut max_high = 0.0;
         let mut min_low = 999_999.0;
         for i in 1..=50 {
-            if i >= 100 {
-                break;
-            }
             let Some(b) = mkt.m15.get(i) else { break };
             if b.high == 0.0 || b.low == 0.0 {
                 break;
@@ -396,7 +404,7 @@ impl Engine {
             }
             let entry_time = self.pending[i].entry_time;
             let mut shift = self.pending[i].entry_bar_shift;
-            let new_shift = bar_shift_by_time(&mkt.m15, entry_time);
+            let new_shift = bar_shift_by_time(&mkt.m15, entry_time, 900); // ±15 min para M15
             if new_shift >= 0 {
                 shift = new_shift;
                 self.pending[i].entry_bar_shift = new_shift;
@@ -426,7 +434,9 @@ impl Engine {
             let entry = self.pending[i].entry_price;
             let mut mfe = entry;
             let mut mae = entry;
-            for b in 0..=shift {
+            // EXCLUSIVO: no incluye la vela de entrada (0..shift). El high/low de la vela
+            // de entrada ocurrió ANTES del close que sirvió como entry_price.
+            for b in 0..shift {
                 let Some(bar) = mkt.m15.get(b as usize) else { break };
                 let h = bar.high;
                 let l = bar.low;
@@ -511,5 +521,102 @@ impl Engine {
     }
     pub(crate) fn confluence_completa(&self, dir: i32, fvg_ahora: bool, fvg_size: f64) -> f64 {
         confluence::confluencia_completa(&self.pending, dir, fvg_ahora, fvg_size, self.cal.fvg_min_size_atr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bar(t: i64, o: f64, h: f64, l: f64, c: f64) -> Bar {
+        Bar { time: t, open: o, high: h, low: l, close: c, volume: 1.0 }
+    }
+
+    fn base_mkt(bars: Vec<Bar>) -> MarketData {
+        MarketData { m15: bars, h1: vec![], h4: vec![], d1: vec![], spread_points: None, ask: None, bid: None }
+    }
+
+    /// Corrección 2: MFE/MAE no incluyen la vela de entrada (0..shift exclusivo).
+    #[test]
+    fn measure_returns_excludes_entry_bar() {
+        let cal = Calibration::default();
+        let info = SymbolInfo::new("EURUSD", 0.00001, 5);
+        let mut engine = Engine::new(cal.clone(), info, vec![]);
+
+        // Señal pendiente: entrada en close de la vela en shift 1 (time=T).
+        let mut sig = Signal::default();
+        sig.id = 1;
+        sig.entry_time = 900;
+        sig.entry_bar_shift = 1;
+        sig.direction = 1;
+        sig.entry_price = 1.0000;
+        engine.pending.push_back(sig);
+
+        // Serie: index 0 = actual (T+900), index 1 = entrada (T), index 2 = anterior.
+        // La vela de entrada tiene high = entry + 20 pips -> NO debe contarse.
+        // La vela 0 tiene high = entry + 10 pips -> MFE esperado = +100 pips.
+        let bars = vec![
+            bar(1800, 1.0005, 1.0010, 0.9995, 1.0005),
+            bar(900, 1.0000, 1.0020, 0.9990, 1.0005),
+            bar(0, 0.9995, 0.9995, 0.9985, 0.9990),
+        ];
+        let mkt = base_mkt(bars);
+        let mut completed = Vec::new();
+        engine.measure_returns(&mkt, &mut completed);
+
+        let p = &engine.pending[0];
+        assert!(p.measured[0], "debe medir shift 0");
+        let mfe_pips = p.mfe[0];
+        assert!((mfe_pips - 100.0).abs() < 1e-9, "MFE debe ser +100 pips, fue {mfe_pips}");
+        let mae_pips = p.mae[0];
+        assert!((mae_pips + 50.0).abs() < 1e-9, "MAE debe ser -50 pips, fue {mae_pips}");
+    }
+
+    /// Corrección 4: señal huérfana por gap se reencuentra con bar_shift tolerante.
+    #[test]
+    fn measure_returns_survives_gap() {
+        let cal = Calibration::default();
+        let info = SymbolInfo::new("EURUSD", 0.00001, 5);
+        let mut engine = Engine::new(cal.clone(), info, vec![]);
+
+        let mut sig = Signal::default();
+        sig.id = 2;
+        sig.entry_time = 900; // la serie NO tiene time=900; la más cercana es 950
+        sig.entry_bar_shift = -1;
+        sig.direction = 1;
+        sig.entry_price = 1.0000;
+        engine.pending.push_back(sig);
+
+        let bars = vec![
+            bar(1850, 1.0005, 1.0010, 0.9995, 1.0005),
+            bar(950, 1.0000, 1.0015, 0.9990, 1.0005),
+            bar(50, 0.9995, 0.9995, 0.9985, 0.9990),
+        ];
+        let mkt = base_mkt(bars);
+        let mut completed = Vec::new();
+        engine.measure_returns(&mkt, &mut completed);
+
+        assert_eq!(engine.pending[0].entry_bar_shift, 1, "debe resolver el gap a shift 1");
+        assert!(engine.pending[0].measured[0]);
+    }
+
+    /// Corrección 5: spread_pips y gap_detected se pueblan en route.
+    #[test]
+    fn route_populates_spread_and_gap() {
+        let cal = Calibration::default();
+        let info = SymbolInfo::new("EURUSD", 0.00001, 5);
+        let mut engine = Engine::new(cal.clone(), info, vec![]);
+
+        let mut sig = Signal::default();
+        sig.id = 3;
+        sig.atr14 = 10.0; // 10 puntos
+        let mut mkt = base_mkt(vec![]);
+        mkt.spread_points = Some(40.0); // > 3×10 => gap
+
+        let mut out = Vec::new();
+        engine.route_signal(&mkt, sig.clone(), &mut out);
+        assert_eq!(engine.pending[0].spread_pips, 40.0);
+        assert!(engine.pending[0].gap_detected);
+        assert_eq!(out.len(), 1);
     }
 }

@@ -170,9 +170,6 @@ impl Engine {
         let mut equal_hl = false;
 
         for i in 1..=2 {
-            if i >= 100 {
-                break;
-            }
             let Some(bi) = mkt.m15.get(i) else { continue };
             let (hi, li) = (bi.high, bi.low);
             if hi == 0.0 || li == 0.0 {
@@ -367,9 +364,6 @@ impl Engine {
         let mut confluencias = 0i32;
         let mut hay_fvg = false;
         for i in 2..=5 {
-            if i >= 100 {
-                break;
-            }
             let (Some(ba), Some(bb), Some(bc)) = (mkt.m15.get(i), mkt.m15.get(i - 1), mkt.m15.get(i - 2)) else { continue };
             let (ha, la) = (ba.high, ba.low);
             let (hb, lb) = (bb.high, bb.low);
@@ -397,9 +391,6 @@ impl Engine {
 
         let mut hay_ob = false;
         for i in 2..=4 {
-            if i >= 100 {
-                break;
-            }
             let Some(bi) = mkt.m15.get(i) else { continue };
             if i == 0 {
                 continue;
@@ -630,9 +621,6 @@ impl Engine {
         let mut ob_vol = 0.0;
 
         for i in 2..=4 {
-            if i >= 100 {
-                break;
-            }
             let Some(bi) = mkt.m15.get(i) else { continue };
             let (oi, ci) = (bi.open, bi.close);
             let (hi, li) = (bi.high, bi.low);
@@ -652,9 +640,6 @@ impl Engine {
 
             let mut tested = false;
             for j in (1..i).rev() {
-                if j >= 100 {
-                    break;
-                }
                 let Some(bj) = mkt.m15.get(j) else { break };
                 let (hj, lj) = (bj.high, bj.low);
                 if hj == 0.0 || lj == 0.0 {
@@ -766,9 +751,6 @@ impl Engine {
         let mut level = 0.0;
 
         for i in 1..=2 {
-            if i >= 100 {
-                break;
-            }
             let Some(bi) = mkt.m15.get(i) else { continue };
             let (hi, li, oi, ci) = (bi.high, bi.low, bi.open, bi.close);
             if hi == 0.0 || li == 0.0 {

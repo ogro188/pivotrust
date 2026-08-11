@@ -1,15 +1,17 @@
+use std::collections::VecDeque;
+
 use crate::indicators::clamp_0_100;
 use crate::types::Signal;
 
 /// HuboSenalRecienteEnDireccion: hay señal del detector en la dirección con entry_bar_shift <= n.
-pub fn hubo_senal_reciente(pending: &[Signal], det: &str, dir: i32, n_velas: i32) -> bool {
+pub fn hubo_senal_reciente(pending: &VecDeque<Signal>, det: &str, dir: i32, n_velas: i32) -> bool {
     pending
         .iter()
         .any(|s| s.detector == det && s.direction == dir && s.entry_bar_shift >= 0 && s.entry_bar_shift <= n_velas)
 }
 
 /// CalcularConfluenciaSweepFVG.
-pub fn confluencia_sweep_fvg(pending: &[Signal], dir: i32, fvg_ahora: bool, fvg_size: f64, min_size_atr: f64) -> f64 {
+pub fn confluencia_sweep_fvg(pending: &VecDeque<Signal>, dir: i32, fvg_ahora: bool, fvg_size: f64, min_size_atr: f64) -> f64 {
     if !hubo_senal_reciente(pending, "D2", dir, 6) {
         return 0.0;
     }
@@ -20,7 +22,7 @@ pub fn confluencia_sweep_fvg(pending: &[Signal], dir: i32, fvg_ahora: bool, fvg_
 }
 
 /// CalcularConfluenciaCompleta.
-pub fn confluencia_completa(pending: &[Signal], dir: i32, fvg_ahora: bool, fvg_size: f64, min_size_atr: f64) -> f64 {
+pub fn confluencia_completa(pending: &VecDeque<Signal>, dir: i32, fvg_ahora: bool, fvg_size: f64, min_size_atr: f64) -> f64 {
     let mut p = 0;
     if hubo_senal_reciente(pending, "D5", dir, 8) {
         p += 1;

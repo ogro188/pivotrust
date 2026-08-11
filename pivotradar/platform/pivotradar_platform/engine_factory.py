@@ -27,6 +27,6 @@ def build_engine(cal: Calibration, pending: list[dict] | None = None):
     - Si la calibración pide `rust` y el módulo compilado está presente: motor Rust.
     - Cualquier otro caso: `ReferenceEngine` (base de prueba).
     """
-    if cal.engine == "rust" and RUST_AVAILABLE:
+    if getattr(cal, "engine", "rust") == "rust" and RUST_AVAILABLE:
         return RustEngine(cal, pending)
     return ReferenceEngine(cal, pending)

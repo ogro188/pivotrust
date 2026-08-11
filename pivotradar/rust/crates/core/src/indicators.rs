@@ -20,15 +20,22 @@ pub fn round_to_digits(x: f64, digits: i32) -> f64 {
     (x * f).round() / f
 }
 
-/// Busca la vela cuyo tiempo == `time` en una serie (índice 0 = actual).
-/// Devuelve el índice (shift) o -1 si no existe (espejo de iBarShift exact=true).
-pub fn bar_shift_by_time(bars: &[Bar], time: i64) -> i32 {
+/// Busca el índice de la vela cuyo time es exacto o el más cercano dentro de ±tolerancia_seg.
+/// Si no hay coincidencia, retorna -1.
+pub fn bar_shift_by_time(bars: &[Bar], time: i64, tolerancia_seg: i64) -> i32 {
+    let mut best_idx: i32 = -1;
+    let mut best_diff: i64 = i64::MAX;
     for (i, b) in bars.iter().enumerate() {
-        if b.time == time {
+        let diff = (b.time - time).abs();
+        if diff == 0 {
             return i as i32;
         }
+        if diff < best_diff && diff <= tolerancia_seg {
+            best_diff = diff;
+            best_idx = i as i32;
+        }
     }
-    -1
+    best_idx
 }
 
 /// EMA sobre closes en orden de serie (índice 0 = más reciente).
@@ -175,36 +182,22 @@ pub fn trend_velas(ema21: &[f64], ema50: &[f64], max_i: usize) -> i32 {
     count
 }
 
-/// Espejo de IsVolatilityExpanding.
-pub fn vol_expanding(history: &[f64; 20]) -> bool {
-    if history[10] == 0.0 {
-        return false;
-    }
-    let mut sum = 0.0;
-    let mut cnt = 0.0;
-    for i in 1..=10 {
-        if history[i] > 0.0 {
-            sum += history[i];
-            cnt += 1.0;
-        }
-    }
-    if cnt == 0.0 {
-        return false;
-    }
-    let avg = sum / cnt;
-    history[0] > avg * 1.30
+/// Lee el valor en el ring buffer a `ago` posiciones atrás (0 = más reciente).
+fn atr_history_at(history: &[f64; 20], head: usize, ago: usize) -> f64 {
+    history[(head + 20 - ago) % 20]
 }
 
-/// Espejo de IsVolatilityCompressing.
-pub fn vol_compressing(history: &[f64; 20]) -> bool {
-    if history[10] == 0.0 {
+/// Espejo de IsVolatilityExpanding (ring buffer de ATR, head = más reciente).
+pub fn vol_expanding(history: &[f64; 20], head: usize) -> bool {
+    if atr_history_at(history, head, 10) == 0.0 {
         return false;
     }
     let mut sum = 0.0;
     let mut cnt = 0.0;
     for i in 1..=10 {
-        if history[i] > 0.0 {
-            sum += history[i];
+        let v = atr_history_at(history, head, i);
+        if v > 0.0 {
+            sum += v;
             cnt += 1.0;
         }
     }
@@ -212,7 +205,28 @@ pub fn vol_compressing(history: &[f64; 20]) -> bool {
         return false;
     }
     let avg = sum / cnt;
-    history[0] < avg * 0.80
+    atr_history_at(history, head, 0) > avg * 1.30
+}
+
+/// Espejo de IsVolatilityCompressing (ring buffer de ATR, head = más reciente).
+pub fn vol_compressing(history: &[f64; 20], head: usize) -> bool {
+    if atr_history_at(history, head, 10) == 0.0 {
+        return false;
+    }
+    let mut sum = 0.0;
+    let mut cnt = 0.0;
+    for i in 1..=10 {
+        let v = atr_history_at(history, head, i);
+        if v > 0.0 {
+            sum += v;
+            cnt += 1.0;
+        }
+    }
+    if cnt == 0.0 {
+        return false;
+    }
+    let avg = sum / cnt;
+    atr_history_at(history, head, 0) < avg * 0.80
 }
 
 /// Espejo de GetVolumeRatio: vol[shift] / media(vol[shift+1..shift+n]).
@@ -294,5 +308,32 @@ mod tests {
         let a = build_signal_id(1000, "D2", 1, 1.23456, 5);
         let b = build_signal_id(1000, "D2", 1, 1.23456, 5);
         assert_eq!(a, b);
+    }
+
+    /// Corrección 4: bar_shift_by_time tolerante a gaps (±900s).
+    #[test]
+    fn bar_shift_exact_match() {
+        let bars = mk_bars(10);
+        let idx = bar_shift_by_time(&bars, bars[3].time, 900);
+        assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn bar_shift_tolerant_to_gap() {
+        // Serie sin time=1000 (gap), pero con time=1050 dentro de ±900s.
+        let bars = vec![
+            Bar { time: 10_800, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 },
+            Bar { time: 10_750, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 },
+            Bar { time: 1050, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 },
+            Bar { time: 0, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: 1.0 },
+        ];
+        let idx = bar_shift_by_time(&bars, 1000, 900);
+        assert_eq!(idx, 2);
+    }
+
+    #[test]
+    fn bar_shift_out_of_tolerance_returns_minus_one() {
+        let bars = mk_bars(10);
+        assert_eq!(bar_shift_by_time(&bars, 999_999, 900), -1);
     }
 }

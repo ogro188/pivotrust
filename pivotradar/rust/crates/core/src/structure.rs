@@ -207,17 +207,21 @@ pub fn actualizar_estructura(
 pub fn detect_mss_h4(bars: &[Bar], lookback: usize) -> Option<(i32, String, f64)> {
     let lookback = lookback.min(50);
     for i in 1..=lookback.min(49) {
-        let b = bars.get(i)?;
+        let Some(b) = bars.get(i) else { continue; };
         let close_i = b.close;
         if close_i == 0.0 {
             continue;
         }
-        let mut prior_high = bars.get(i + 1)?.high;
-        let mut prior_low = bars.get(i + 1)?.low;
+        // Búsqueda de máximo/mínimo previo excluyendo la vela i (MSS) e incluyendo desde i+1 en adelante.
+        // Fiel al EA v7.6 (MotorD5_MSS_Sweep). No modificar sin validar contra MQL5.
+        let Some(b_next) = bars.get(i + 1) else { continue; };
+        let mut prior_high = b_next.high;
+        let mut prior_low = b_next.low;
         let k_end = (i + lookback).min(50);
         for k in (i + 1)..=k_end {
-            let hk = bars.get(k)?.high;
-            let lk = bars.get(k)?.low;
+            let Some(bk) = bars.get(k) else { break; };
+            let hk = bk.high;
+            let lk = bk.low;
             if hk == 0.0 || lk == 0.0 {
                 break;
             }
@@ -243,9 +247,6 @@ pub fn zona_premium_discount(m15: &[Bar], nivel: f64) -> (bool, String) {
     let mut max_high = 0.0;
     let mut min_low = 999_999.0;
     for i in 1..=50 {
-        if i >= 100 {
-            break;
-        }
         let Some(b) = m15.get(i) else { break };
         if b.high == 0.0 || b.low == 0.0 {
             break;
@@ -305,4 +306,42 @@ pub fn evaluar_contexto_estructural(
         score += 10.0;
     }
     (clamp_0_100(score), distancia)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bar(t: i64, h: f64, l: f64, c: f64) -> Bar {
+        Bar { time: t, open: c, high: h, low: l, close: c, volume: 1.0 }
+    }
+
+    /// Corrección 1: con H4 más corto que lookback no debe abortar por `?`.
+    #[test]
+    fn detect_mss_short_series_no_abort() {
+        // 5 velas, lookback 20. Antes: bars.get(i)? abortaba -> None inmediato.
+        let bars = vec![
+            bar(5, 100.0, 90.0, 95.0),
+            bar(4, 105.0, 92.0, 104.0), // i=1: close 104 > prior_high(99) -> MSS ALCISTA
+            bar(3, 99.0, 90.0, 95.0),
+            bar(2, 98.0, 88.0, 90.0),
+            bar(1, 96.0, 86.0, 88.0),
+        ];
+        let r = detect_mss_h4(&bars, 20);
+        assert!(r.is_some(), "no debe abortar por serie corta");
+        let (bars_ago, dir, _) = r.unwrap();
+        assert_eq!(bars_ago, 1);
+        assert_eq!(dir, "ALCISTA");
+    }
+
+    #[test]
+    fn detect_mss_returns_none_when_no_mss() {
+        let bars = vec![
+            bar(3, 100.0, 95.0, 99.0),
+            bar(2, 99.0, 94.0, 96.0),
+            bar(1, 98.0, 93.0, 95.0),
+            bar(0, 97.0, 92.0, 94.0),
+        ];
+        assert!(detect_mss_h4(&bars, 10).is_none());
+    }
 }

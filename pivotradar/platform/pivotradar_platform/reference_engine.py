@@ -102,11 +102,18 @@ def _kill_zone(hour: int, minute: int) -> str:
     return "NONE"
 
 
-def _bar_shift_by_time(bars, time_sec: int) -> int:
+def _bar_shift_by_time(bars, time_sec: int, tolerancia_sec: int = 900) -> int:
+    """Índice de la vela con time exacto o el más cercano dentro de ±tolerancia_sec."""
+    best_idx = -1
+    best_diff = float("inf")
     for i, b in enumerate(bars):
-        if b.time == time_sec:
+        diff = abs(b.time - time_sec)
+        if diff == 0:
             return i
-    return -1
+        if diff < best_diff and diff <= tolerancia_sec:
+            best_diff = diff
+            best_idx = i
+    return best_idx
 
 
 def _volume_ratio(bars, shift: int, n: int) -> float:
@@ -1219,12 +1226,16 @@ class ReferenceEngine:
             if ok:
                 sig.hipotesis_zona = zona
             self._generar_hipotesis(sig, mkt)
-            self._route(sig, out)
+            self._route(mkt, sig, out)
         return out
 
-    def _route(self, sig: Signal, out: EngineOutput):
+    def _route(self, mkt: MarketData, sig: Signal, out: EngineOutput):
         for f in ("calidad_sweep", "calidad_mss", "calidad_fvg", "calidad_ob", "salud_tendencial", "contexto_estructural"):
             setattr(sig, f, _clamp(getattr(sig, f)))
+        if mkt.spread_points is not None:
+            sig.spread_pips = mkt.spread_points
+        if sig.atr14 > 0 and sig.spread_pips > sig.atr14 * 3:
+            sig.gap_detected = True
         if len(self.pending) >= _MAX_PENDING:
             self.pending.pop(0)
         self.pending.append(sig)
@@ -1252,9 +1263,7 @@ class ReferenceEngine:
             if close == 0:
                 continue
             mfe = mae = sig.entry_price
-            for b in range(shift, -1, -1):
-                if b >= len(mkt.m15):
-                    break
+            for b in range(shift - 1, -1, -1):   # EXCLUSIVO: omite la vela de entrada
                 bar = mkt.m15[b]
                 if bar.high == 0 or bar.low == 0:
                     break
